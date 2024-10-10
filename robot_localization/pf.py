@@ -11,7 +11,7 @@ from sensor_msgs.msg import LaserScan
 from nav2_msgs.msg import ParticleCloud, Particle
 from nav2_msgs.msg import Particle as Nav2Particle
 from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, Point, Quaternion
-from rclpy.duration import Duration
+from rclpy.duration import Durationf
 import math
 import time
 import numpy as np
@@ -213,6 +213,27 @@ class ParticleFilter(Node):
             return
 
         # TODO: modify particles using delta
+        x1, y1, theta_1 = old_odom_xy_theta
+        x2, y2, theta_2 = new_odom_xy_theta
+
+        T_t1_0 = np.array(
+            [math.cos(theta_1), -math.sin(theta_1), x1],
+            [math.sin(theta_1), math.cos(theta_1), y1],
+            [0, 0, 1]
+        )
+
+        T_t2_0 = np.array(
+            [math.cos(theta_2), -math.sin(theta_2), x2],
+            [math.sin(theta_2), math.cos(theta_2), y2],
+            [0, 0, 1]
+        )
+
+        T_t2_t1 = np.matmul(np.linalg.inv(T_t1_0), T_t2_0)
+
+        for p in self.particle_cloud:
+            curr_pos = [p.x, p.y, p.theta]
+            p.x, p.y, p.theta = np.matmul(curr_pos, T_t2_t1)
+
 
     def resample_particles(self):
         """ Resample the particles according to the new particle weights.

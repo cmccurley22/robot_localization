@@ -7,7 +7,7 @@ from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, TransformSta
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros.transform_broadcaster import TransformBroadcaster
-from angle_helpers import euler_from_quaternion
+from angle_helpers import euler_from_quaternion, quaternion_from_euler
 from rclpy.time import Time
 from rclpy.duration import Duration
 import math
@@ -67,6 +67,15 @@ class TFHelper(object):
                              pose.orientation.w)
         angles = euler_from_quaternion(*orientation_tuple)
         return (pose.position.x, pose.position.y, angles[2])
+    
+    def convert_xy_and_theta_to_pose(self, x, y, theta):
+        """ Convert a (x,y,yaw) tuple to a pose (geometry_msgs.Pose) """
+        q = quaternion_from_euler(x, y, theta)
+
+        return Pose(
+            position = Point(x = x, y = y, z = 0),
+            orientation = Quaternion(x = q[0], y = q[1], z = q[2], w = q[3])
+        )
 
     def angle_normalize(self, z):
         """ convenience function to map an angle to the range [-pi,pi] """
