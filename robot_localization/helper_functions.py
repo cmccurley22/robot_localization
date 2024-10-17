@@ -73,7 +73,7 @@ class TFHelper(object):
         q = quaternion_from_euler(x, y, theta)
 
         return Pose(
-            position = Point(x = x, y = y, z = 0),
+            position = Point(x = x, y = y, z = 0.0),
             orientation = Quaternion(x = q[0], y = q[1], z = q[2], w = q[3])
         )
 

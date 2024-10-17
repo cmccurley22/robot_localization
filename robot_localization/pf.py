@@ -11,7 +11,7 @@ from sensor_msgs.msg import LaserScan
 from nav2_msgs.msg import ParticleCloud, Particle
 from nav2_msgs.msg import Particle as Nav2Particle
 from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, Point, Quaternion
-from rclpy.duration import Durationf
+from rclpy.duration import Duration
 import math
 import time
 import numpy as np
@@ -186,7 +186,18 @@ class ParticleFilter(Node):
 
         # TODO: assign the latest pose into self.robot_pose as a geometry_msgs.Pose object
         # just to get started we will fix the robot's pose to always be at the origin
-        self.robot_pose = Pose()
+
+        new_x = 0.0
+        new_y = 0.0
+        new_theta = 0.0
+
+        for p in self.particle_cloud:
+            new_x += p.w * p.x
+            new_y += p.w * p.y
+            new_theta += p.w * p.theta
+
+        self.robot_pose = self.transform_helper.convert_xy_and_theta_to_pose(new_x, new_y, new_theta)
+
         if hasattr(self, 'odom_pose'):
             self.transform_helper.fix_map_to_odom_transform(self.robot_pose,
                                                             self.odom_pose)
@@ -216,23 +227,27 @@ class ParticleFilter(Node):
         x1, y1, theta_1 = old_odom_xy_theta
         x2, y2, theta_2 = new_odom_xy_theta
 
-        T_t1_0 = np.array(
+        T_t1_0 = np.array([
             [math.cos(theta_1), -math.sin(theta_1), x1],
             [math.sin(theta_1), math.cos(theta_1), y1],
             [0, 0, 1]
-        )
+        ])
 
-        T_t2_0 = np.array(
+        T_t2_0 = np.array([
             [math.cos(theta_2), -math.sin(theta_2), x2],
             [math.sin(theta_2), math.cos(theta_2), y2],
             [0, 0, 1]
-        )
+        ])
 
         T_t2_t1 = np.matmul(np.linalg.inv(T_t1_0), T_t2_0)
 
         for p in self.particle_cloud:
             curr_pos = [p.x, p.y, p.theta]
+            print(f"x: {p.x}, y: {p.y}, theta: {p.theta}")
+            print("updating x, y, and theta aaaaa")
             p.x, p.y, p.theta = np.matmul(curr_pos, T_t2_t1)
+            p.theta = self.transform_helper.angle_normalize(p.theta)
+            print(f"x: {p.x}, y: {p.y}, theta: {p.theta}")
 
 
     def resample_particles(self):
@@ -245,13 +260,42 @@ class ParticleFilter(Node):
         self.normalize_particles()
         # TODO: fill out the rest of the implementation
 
+        # sort particles based on weight
+        def w(p): return p.w
+        self.particle_cloud.sort(key = w)
+
+        # keep % of previous particles
+        percent_kept = .25
+        self.particle_cloud = self.particle_cloud[:int(self.n_particles * percent_kept)]
+
+        # generate new particles
+        new_ps = int(1 / percent_kept) - 1
+
+        for p in self.particle_cloud:
+            xs = np.random.normal(p.x, .05, new_ps)
+            ys = np.random.normal(p.y, .05, new_ps)
+            thetas = np.random.normal(p.theta, .1, new_ps)
+
+            for i in range(new_ps):
+                new_p = Particle(xs[i], ys[i], thetas[i], p.w)
+
+                self.particle_cloud.append(new_p)
+        
+        self.normalize_particles()
+
+
     def update_particles_with_laser(self, r, theta):
         """ Updates the particle weights in response to the scan data
             r: the distance readings to obstacles
             theta: the angle relative to the robot frame for each corresponding reading 
         """
         # TODO: implement this
-        pass
+        dist_laser = min(r)
+
+        for p in self.particle_cloud:
+            dist_occ_field = self.occupancy_field.get_closest_obstacle_distance(p.x, p.y)
+
+            p.w = 1 / abs(dist_laser - dist_occ_field)
 
     def update_initial_pose(self, msg):
         """ Callback function to handle re-initializing the particle filter based on a pose estimate.
@@ -259,7 +303,7 @@ class ParticleFilter(Node):
         xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(msg.pose.pose)
         self.initialize_particle_cloud(msg.header.stamp, xy_theta)
 
-    def initialize_particle_cloud(self, timestamp, xy_theta=None):
+    def initialize_particle_cloud(self, timestamp, xy_theta = None):
         """ Initialize the particle cloud.
             Arguments
             xy_theta: a triple consisting of the mean x, y, and theta (yaw) to initialize the
@@ -269,13 +313,32 @@ class ParticleFilter(Node):
         self.particle_cloud = []
         # TODO create particles
 
+        std_pos = .25
+        std_theta = math.pi / 2
+
+        x, y, theta = xy_theta
+
+        xs = np.random.normal(x, std_pos, self.n_particles)
+        ys = np.random.normal(y, std_pos, self.n_particles)
+        thetas = np.random.normal(theta, std_theta, self.n_particles)
+
+        for i in range(self.n_particles):
+            p = Particle(xs[i], ys[i], thetas[i], 1 / self.n_particles)
+
+            self.particle_cloud.append(p)
+
         self.normalize_particles()
         self.update_robot_pose()
 
     def normalize_particles(self):
         """ Make sure the particle weights define a valid distribution (i.e. sum to 1.0) """
         # TODO: implement this
-        pass
+        
+        weights_sum = sum([p.w for p in self.particle_cloud])
+
+        if weights_sum != 1:
+            for p in self.particle_cloud:
+                p.w /= weights_sum
 
     def publish_particles(self, timestamp):
         msg = ParticleCloud()
